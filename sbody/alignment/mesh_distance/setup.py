@@ -19,7 +19,7 @@ if platform.system().lower() in ['darwin']:
     extra_link_args=['-stdlib=libc++'] 
 
 # Add path of EIGEN here
-EIGEN_DIR = './eigen'
+EIGEN_DIR = '/home/filby/workspace/EAVTTS/flame-fitting/sbody/alignment/eigen-3.3.7'
 
 def setup_extended(parallel=True, numpy_includes=True, usr_local_includes=True, **kwargs):
     """Like "setup" from distutils

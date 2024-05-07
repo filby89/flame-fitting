@@ -99,8 +99,10 @@ def fit_scan(  scan,                        # input scan
     # variables
     shape_idx      = np.arange( 0, min(300,shape_num) )        # valid shape component range in "betas": 0-299
     expr_idx       = np.arange( 300, 300+min(100,expr_num) )   # valid expression component range in "betas": 300-399
-    used_idx       = np.union1d( shape_idx, expr_idx )
+    # used_idx       = np.union1d( shape_idx, expr_idx )
+    used_idx       = shape_idx
     model.betas[:] = np.random.rand( model.betas.size ) * 0.0  # initialized to zero
+    model.betas[expr_idx] = 0.0
     model.pose[:]  = np.random.rand( model.pose.size ) * 0.0   # initialized to zero
     free_variables = [model.trans, model.pose, model.betas[used_idx]] 
     
@@ -111,7 +113,22 @@ def fit_scan(  scan,                        # input scan
 
     # objectives
     # landmark error
+
+
+    def landmark_error_3d( mesh_verts, mesh_faces, lmk_3d, lmk_face_idx, lmk_b_coords, weight=1.0 ):
+        """ function: 3d landmark error objective
+        """
+
+        flame_lmks = [3632,3833,3564,2827,1710]
+
+        # residual vectors
+        lmk3d_obj = weight * (mesh_verts[flame_lmks] - lmk_3d)
+
+        return lmk3d_obj
+
+
     lmk_err = landmark_error_3d(mesh_verts=model, mesh_faces=model.f,  lmk_3d=lmk_3d, lmk_face_idx=lmk_face_idx, lmk_b_coords=lmk_b_coords)
+
 
     # scan-to-mesh distance, measuring the distance between scan vertices and the closest points in the model's surface
     sampler = sample_from_mesh(scan, sample_type='vertices')
@@ -122,19 +139,20 @@ def fit_scan(  scan,                        # input scan
     expr_err  = weights['expr']  * model.betas[expr_idx] 
     pose_err  = weights['pose']  * model.pose[3:] # exclude global rotation
 
-    objectives = {'s2m': weights['s2m']*s2m, 'lmk': weights['lmk']*lmk_err, 'shape': shape_err, 'expr': expr_err, 'pose': pose_err} 
+    # objectives = {'s2m': weights['s2m']*s2m, 'lmk': weights['lmk']*lmk_err, 'shape': shape_err, 'expr': expr_err, 'pose': pose_err} 
+    objectives = {'s2m': weights['s2m']*s2m, 'shape': shape_err, 'expr': expr_err, 'pose': pose_err} 
 
     # options
-    if opt_options is None:
-        print("fit_lmk3d(): no 'opt_options' provided, use default settings.")
-        import scipy.sparse as sp
-        opt_options = {}
-        opt_options['disp']    = 1
-        opt_options['delta_0'] = 0.1
-        opt_options['e_3']     = 1e-4
-        opt_options['maxiter'] = 2000
-        sparse_solver = lambda A, x: sp.linalg.cg(A, x, maxiter=opt_options['maxiter'])[0]
-        opt_options['sparse_solver'] = sparse_solver
+    # if opt_options is None:
+    #     print("fit_lmk3d(): no 'opt_options' provided, use default settings.")
+    #     import scipy.sparse as sp
+    #     opt_options = {}
+    #     opt_options['disp']    = 1
+    #     opt_options['delta_0'] = 0.1
+    #     opt_options['e_3']     = 1e-4
+    #     opt_options['maxiter'] = 10
+    #     sparse_solver = lambda A, x: sp.linalg.cg(A, x, maxiter=opt_options['maxiter'])[0]
+    #     opt_options['sparse_solver'] = sparse_solver
 
     # on_step callback
     def on_step(_):
@@ -152,6 +170,9 @@ def fit_scan(  scan,                        # input scan
                  options  = opt_options )
     timer_end = time()
     print("step 1: fitting done, in %f sec\n" % ( timer_end - timer_start ))
+    # return results
+    # parms = { 'trans': model.trans.r, 'pose': model.pose.r, 'betas': model.betas.r }
+    # return model.r, model.f, parms
 
     # step 2: non-rigid alignment
     timer_start = time()
@@ -171,20 +192,24 @@ def fit_scan(  scan,                        # input scan
 
 def run_fitting():
     # input scan
-    scan_path = './data/scan.obj'
+    scan_path = './my_face2_open_mouth.obj'
 
     # landmarks of the scan
-    scan_lmk_path = './data/scan_lmks.npy'
+    # scan_lmk_path = './data/scan_lmks.npy'
 
     # measurement unit of landmarks ['m', 'cm', 'mm', 'NA'] 
     # When using option 'NA', the scale of the scan will be estimated by rigidly aligning model and scan landmarks
     scan_unit = 'm' 
+    # target_mesh_lmks = [1058,3058,1858,625,2718]
+    # target_mesh_lmks = [864,2976,1662,946,3073]
+    target_mesh_lmks = [862,2976,3808,429,2522]
 
     scan = Mesh(filename=scan_path)
     print("loaded scan from:", scan_path)
 
-    lmk_3d = np.load(scan_lmk_path)
-    print("loaded scan landmark from:", scan_lmk_path)
+    # lmk_3d = np.load(scan_lmk_path)
+    # print("loaded scan landmark from:", scan_lmk_path)
+    lmk_3d = scan.v[target_mesh_lmks]
 
     # model
     model_path = './models/generic_model.pkl' # change to 'female_model.pkl' or 'male_model.pkl', if gender is known
@@ -215,13 +240,13 @@ def run_fitting():
     # weights
     weights = {}
     # scan vertex to model surface distance term
-    weights['s2m']   = 2.0   
+    weights['s2m']   = 10.0   
     # landmark term
     weights['lmk']   = 1e-2
     # shape regularizer (weight higher to regularize face shape more towards the mean)
-    weights['shape'] = 1e-4
+    weights['shape'] = 1e-6
     # expression regularizer (weight higher to regularize facial expression more towards the mean)
-    weights['expr']  = 1e-4
+    weights['expr']  = 1#1e-1
     # regularization of head rotation around the neck and jaw opening (weight higher for more regularization)
     weights['pose']  = 1e-3
     # Parameter of the Geman-McClure robustifier (higher weight for a larger bassin of attraction which makes it less robust to outliers)
@@ -233,7 +258,7 @@ def run_fitting():
     opt_options['disp']    = 1
     opt_options['delta_0'] = 0.1
     opt_options['e_3']     = 1e-4
-    opt_options['maxiter'] = 2000
+    opt_options['maxiter'] = 20
     sparse_solver = lambda A, x: sp.linalg.cg(A, x, maxiter=opt_options['maxiter'])[0]
     opt_options['sparse_solver'] = sparse_solver
 
@@ -254,6 +279,9 @@ def run_fitting():
     # output scaled scan for reference (output scan fit and the scan should be spatially aligned)
     output_path = join( output_dir, 'scan_scaled.obj' )    
     write_simple_obj( mesh_v=scan.v, mesh_f=scan.f, filepath=output_path, verbose=False )
+
+    shape_params = parms['betas'][0:300]
+    np.save('sample_shape.npy', shape_params)
 
 # -----------------------------------------------------------------------------
 
